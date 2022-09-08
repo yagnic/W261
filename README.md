@@ -1,116 +1,101 @@
-# Classification Based on Probability
-The aim of the project is to implement a classifier for the Iris dataset based on
-* Maximum likelihood
-* Maximum A-posteriori Classification
+# Sequential Estimation
+Online learning is very important in machine learning as it allows for the inclusion of new data samples without having to recalculate model parameters for the rest of the data. The aim of this exercise is to explore this concept.
 
-## Section 1 - Maximum Likelihood
-The maximum likelihood for classification only relies on the class conditional probabilities and ignores prior probabilities. We assume that the class conditional probability density function for the Iris dataset classes are Gaussian:
+## Section 1
+We will now look into online estimation of a mean vector. The objective is to apply the following formula for estimating a mean *(see Bishop Section 2.3.5)*:
 
 $$
-p(\mathbf{x}|\mathcal{C}_k)=\frac{1}{(2\pi)^{D/2}}\frac{1}{|\mathbf{\Sigma}_k|^{1/2}} e^{\{-\frac{1}{2}(\mathbf{x}-\mathbf{\mu}_k)^T\mathbf{\Sigma}_k^{-1}(\mathbf{x}-\mathbf{\mu}_k)\}}
+\mu_{ML}^{N} = \mu_{ML}^{N-1} + \frac{1}{N}(x_n - \mu_{ML}^{N-1})
 $$
-
-We will start by estimating $\mu_1, \Sigma_1, \mu_2, \Sigma_2, \mu_3, \Sigma_3$  using the training data.
 
 ### Section 1.1
-Create a function `mean_of_class(features, targets, class)` which returns the mean of all features which targets correspond to the given `class`.
+Let's first create a data generator. Create a function `gen_data(n, k, mean, var)` which returns a $n\times k$ array, $X$. This $X$ contains a sequence of $n$ vectors of dimension $k$. Each vector $x_i$ in $X$ should be $x_i \sim N_k(\mu, \sigma^2I_k)$ where:
 
-Example inputs and outputs:
+* $N_k()$ is the [k-variate normal distribution](https://en.wikipedia.org/wiki/Multivariate_normal_distribution)
+* $\mu$ (or `mean`) is the mean vector of dimension $k$
+* $\sigma$ (or `var`) is the variance.
+* $I_k$ is the [identity matrix](https://en.wikipedia.org/wiki/Identity_matrix)
 
-**First load the data**
+You should use [`np.random.multivariate_normal`](https://docs.scipy.org/doc/numpy-1.14.0/reference/generated/numpy.random.multivariate_normal.html) for this.
+
+Example inputs and outputs (these examples use `np.random.seed(1234)`):
+1. `gen_data(2, 3, np.array([0, 1, -1]), 1.3)`
 ```
-features, targets, classes = load_iris()
-(train_features, train_targets), (test_features, test_targets)\
-    = split_train_test(features, targets, train_ratio=0.6)
+[[ 0.61286571, -0.5482684 ,  0.86251906],
+ [-0.40644746,  0.06323465,  0.15331182]]
 ```
-
-`mean_of_class(train_features, train_targets, 0)`
--> `[5.005  3.4425 1.4625 0.2575]`
-
+2. `gen_data(5, 1, np.array([0.5]), 0.5)`
+```
+[[ 0.73571758],
+ [-0.09548785],
+ [ 1.21635348],
+ [ 0.34367405],
+ [ 0.13970563]]
+```
 
 ### Section 1.2
-Create a function `covar_of_class(features, targets, class)` which returns the covariance of features which targets correspond to the given `class`. Take a look at `help.estimate_covariance` for more information on covariance.
+**Answer this question in a pdf (you can use the same pdf as for the independend section)**
 
-Inputs and outputs:
-`covar_of_class(train_features, train_targets, 0)` ->
-```
-[[0.11182346 0.09470383 0.01757259 0.01440186]
- [0.09470383 0.14270035 0.01364111 0.01461672]
- [0.01757259 0.01364111 0.03083043 0.00717189]
- [0.01440186 0.01461672 0.00717189 0.01229384]]
-```
+Lets create some data $X$. Create 300 3-dimensional data points sampled from $N_3([0, 1, -1], \sqrt{3})$
 
-### Section 1.3
-Create a function `likelihood_of_class(feature, class_mean, class_covar)` that returns the probability that the feature belongs to the class with the given mean and covariance matrix. To achieve this you should use `scipy.stats.multivariate_normal`, see `help.pdf`.
+You can visualize your data using `tools.scatter_3d_data` to get a plot similar to the following
 
-Example inputs and outputs:
-```
-class_mean = mean_of_class(train_features, train_targets, 0)
-class_cov = covar_of_class(train_features, train_targets, 0)
-```
-`likelihood_of_class(test_features[0, :], class_mean, class_cov)` -> `7.174078020748095e-85`
+![Simple Scatter](images/simple_scatter.png)
+
+You can also use `tools.bar_per_axis` to visualize the distribution of the data per dimension:
+
+![Simple Bar](images/simple_bar.png)
+
+Do you expect the batch estimate to be exactly $(0, 1, -1)$ ? Which two parameters can be used to make this estimate more accurate?
 
 ### Section 1.4
-Create a function `maximum_likelihood(train_features, train_targets, test_features, classes)` that:
-1. Estimates the mean and covariance of all classes using the training data
-2. For each test sample, estimate the likelihoods that the feature belongs to any of the given classes. For $n$ test points and $c$ classes you should return a $[c \times n]$ numpy array.
+We will now implement the sequential estimate.
 
-`maximum_likelihood(train_features, train_targets, test_features, classes)` ->
-```
-[
-    [2.314690048825263e-149, 0.0036329728501139275, 0.09701357803849536],
-    [1.8635307438480972e-67, 2.4090713729753066, 0.00026197385870806855],
-    ...
-    [8.159929006721418, 3.8167195682014385e-17, 6.1308262198933825e-34],
-    [1.6369648758616588e-75, 0.42242605396419014, 6.512799125377976e-05]
-]
-```
+We want a function that returns $N$ number of sequential estimates of the mean vector where we feed one vector from $X$ at a time into the function. We start by implementing the update equation above.
 
-
-### Section 1.5.
-Finally create a function `predict(likelihoods)` that, using the given likelihoods, determine a class prediction using
-
-$$\hat{k}_n=\arg \max_k p(\mathbf{x}_n|\mathcal{C}_k)$$
+Create a function `update_sequence_mean(mu, x, n)` which performs the update in the equation above.
 
 Example inputs and outputs:
-
 ```
-likelihoods = maximum_likelihood(train_features, train_targets, test_features, classes)
+mean = np.mean(X, 0)
+new_x = gen_data(1, 3, np.array([0, 0, 0]), 1)
+update_sequence_mean(mean, new_x, X.shape[0])
 ```
-`predict(likelihoods)` -> `[0 2 0 ... 0 1 2]`
+Results in an array, similar to `[[-0.21653761 -0.00721158 -0.15876203]]` (since we're using random numbers, the values you get will probably not be exactly the same).
 
+### Section 1.5
+Lets plot the estimates on all dimensions as the sequence estimate gets updated. You can use `_plot_sequence_estimate()` as a template. You should:
+* Generate 100 3-dimensional points with the same mean and variance as above.
+* Set the initial estimate as $(0, 0, 0)$
+* And perform `update_sequence_mean` for each point in the set.
+* Collect the estimates as you go
 
-## Section 2 - Maximum Aposteriori classification
-The problem with maximum likelihood classification is that the prior probabilities are ignored. This can be justified if the prior probabilities are the same but it is often better to discover this through the data. The maximum likelihood estimate of the prior probability of a class is simply the proportion of the number of samples of that class in the training data, i.e.
+For a different set of points this plot looks like the following:
 
-$$
-    p(\mathcal{C}_k) = \frac{N_k}{N}
-$$
+![Rolling estimate](./images/rolling_estimate.png)
 
-Where $N_k$ is the number of samples belonging to class  $\mathcal{C}_k$ and $N$ is the number of samples in the training sample.
+Turn in your plot as `1_5_1.png`
 
-### Section 2.1
-Create a function `maximum_aposteriori(train_features, train_targets, test_features, classes)`
-that predicts class likelihoods of samples from `test_features` using a-posteriori probabilities.
+### Section 1.6
+Lets now plot the squared error between the estimate and the actual mean after every update.
 
-This function should be very similar to your `maximum_likelihood` function.
+The squared error between e.g. a ground truth $y$ and a prediction $\hat{y}$ is $(y-\hat{y})^2$.
 
-### Section 2.2
-**This question should be answered in a pdf (you can use the same pdf as for the independent section)**
+Of course our data will be 3-dimensional so after calculating the squared error you will have a 3-dimensional error. Take the mean of those three values to get the average error across all three dimensions and plot those values.
 
-Compare the accuracy of your `maximum_likelihood` and `maximum_aposteriori` by comparing the predictions from both methods to the actual test labels.
+You can use `_plot_square_error` and `_square_error` for this.
 
-1. What is the accuracy of each method?
-2. How are the confusion matrices? Use your own code from assignment 1 and compare the matrices.
-3. How do you interpret the differences? Why is/is not a difference in accuracy?
+For a different distribution this plot looks like the following:
 
-### Independent Section
-*A rough idea of an independent section idea is listed below. You are free to explore different approaches.*
+![Rolling error](./images/rolling_error.png)
 
-In what kind of situations would a posteriori classification be better than maximum likelihood classification? Find or create a dataset (or alter the Iris dataset) to make a posteriori classifications outperform maximum likelihood predictions.
+Turn in your plot as `1_6_1.png`
 
-Demonstrate this by comparing accuracy, confusion matrices, plots across different data configurations and draw your conclusions.
+## Independent Section
+What happens if the mean value changes (perhaps slowly) with time? What if  $\mu =(0,1,-1)$ moves to  $\mu=(1,-1,0)$ in 500 time ticks? How would we track the mean? Some sort of a forgetting could be added to the update equation. How would that be done?
 
-**Upload a pdf with your solution**
-Your solution should contain an explanation of what you did, any plots or relevant explanations and the results of your experiments. Include all code you generated as well.
+Create this type of data and formulate a method for tracking the mean.
 
+Plot the estimate of all dimensions and the mean squared error over all three dimensions. Turn in these plots as `indep_1.png` and `indep_2.png`.
+
+Write a short summary how your method works.
